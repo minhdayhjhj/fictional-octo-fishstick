@@ -16976,6 +16976,31 @@ def av_restore_quarantine(vault_file_name: str, original_path: str) -> bool:
         return False
 
 
+
+def check_magic_bytes(filepath: str) -> str:
+    """Kiểm tra chữ ký file để xác định loại file thực sự"""
+    try:
+        with open(filepath, 'rb') as f:
+            header = f.read(8)
+
+        if header.startswith(b'MZ'):
+            return "PE (Windows Executable)"
+        elif header.startswith(b'\x7fELF'):
+            return "ELF (Linux Executable)"
+        elif header.startswith(b'%PDF'):
+            return "PDF Document"
+        elif header.startswith(b'PK\x03\x04'):
+            return "ZIP Archive / Office DOCX"
+        elif header.startswith(b'Rar!\x1A\x07'):
+            return "RAR Archive"
+        elif header.startswith(b'\x50\x4B\x03\x04'):
+            return "ZIP Archive"
+        elif header.startswith(b'\x4D\x5A'):
+            return "DLL or EXE"
+        return "Unknown"
+    except Exception:
+        return "Unreadable"
+
 def av_scan_running_processes() -> List[dict]:
     """Quét toàn bộ tiến trình: kiểm tra đường dẫn giả mạo, tiến trình trong TEMP, command-line khả nghi."""
     threats = []
@@ -17018,6 +17043,17 @@ def av_scan_running_processes() -> List[dict]:
                     suspicious = True
                     reason = f"Giả mạo tiến trình hệ thống Windows ({exe})"
                     severity = "CRITICAL"
+            # 4. Kiểm tra loại file qua Magic Bytes nếu không thể xác minh
+            if not suspicious and exe:
+                mb = check_magic_bytes(exe)
+                if mb not in ("PE (Windows Executable)", "DLL or EXE") and "Unknown" not in mb and mb != "Unreadable":
+                    if not name.endswith(".exe") and not name.endswith(".dll"):
+                        pass # probably fine if not masquerading
+                    else:
+                        suspicious = True
+                        reason = f"File thực thi có chữ ký giả mạo (Magic Byte: {mb})"
+                        severity = "HIGH"
+
                     
             # 4. Command-line chứa script mã hóa PowerShell / Bypassing
             elif cmdline:
@@ -18733,6 +18769,53 @@ class AvTelemetryBar(QWidget):
 
 
 # ----------------------------------------------------------------- PAGE -----
+
+class DeepScanDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(T("Trình duyệt Quét Sâu - CleanMaster Pro"))
+        self.resize(800, 600)
+
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setStyleSheet("background: #0B0715; color: #EAF2F8; font-family: 'Segoe UI';")
+
+        lay = QVBoxLayout(self)
+
+        # Tiêu đề
+        hdr = QLabel(T("Tiến trình Quét Sâu Toàn Diện"))
+        hdr.setStyleSheet("font-size: 20px; font-weight: 800; color: #F87171;")
+        lay.addWidget(hdr)
+
+        # Path hiện tại
+        self.path_lbl = QLabel(T("Đang chuẩn bị..."))
+        self.path_lbl.setStyleSheet("color: #8FA3B8; font-family: Consolas, monospace;")
+        self.path_lbl.setWordWrap(True)
+        lay.addWidget(self.path_lbl)
+
+        # Log Box
+        self.log_txt = QTextEdit()
+        self.log_txt.setReadOnly(True)
+        self.log_txt.setStyleSheet("background: #170B2E; color: #3DDBA5; font-family: Consolas, monospace; border: 1px solid #332960;")
+        lay.addWidget(self.log_txt, 1)
+
+        # Buttons
+        btn_lay = QHBoxLayout()
+        self.btn_stop = GlowButton(T("Dừng quét"), "danger")
+        self.btn_stop.clicked.connect(self.reject)
+        btn_lay.addStretch(1)
+        btn_lay.addWidget(self.btn_stop)
+        lay.addLayout(btn_lay)
+
+    def log(self, text, is_threat=False):
+        color = "#F87171" if is_threat else "#3DDBA5"
+        self.log_txt.append(f"<span style='color:{color}'>{text}</span>")
+        sb = self.log_txt.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def update_path(self, path):
+        self.path_lbl.setText(f"Đang quét: {path}")
+
+
 class AntivirusPage(QWidget):
     """Antivirus Pro — Quét siêu sâu 14 bước, Shannon Entropy, Disguised PE, Memory, MBR, WMI, LNK, ADS & Sentinel Real-time."""
 
@@ -19131,6 +19214,28 @@ class AntivirusPage(QWidget):
         self._worker.sig_threat.connect(self._on_threat)
         self._worker.sig_progress.connect(self._on_progress)
         self._worker.sig_done.connect(self._on_done)
+
+        if mode == "deep":
+            self.scan_dialog = DeepScanDialog(self)
+            self._worker.sig_progress.connect(lambda c, p, fps, t: self.scan_dialog.update_path(p))
+            self._worker.sig_step.connect(lambda st, state, note: self.scan_dialog.log(f"Bước {st+1}/14: {note}"))
+            self._worker.sig_threat.connect(lambda th: self.scan_dialog.log(f"PHÁT HIỆN: {th.get('name')} tại {th.get('path', th.get('desc'))}", True))
+
+            def handle_done_dialog(*args):
+                if hasattr(self, 'scan_dialog') and self.scan_dialog:
+                    self.scan_dialog.log("QUÉT HOÀN TẤT.")
+                    self.scan_dialog.btn_stop.setText(T("Đóng"))
+            self._worker.sig_done.connect(handle_done_dialog)
+
+            self._worker.start()
+            av_log(f"User started scan mode={mode}, path={custom_path}")
+
+            if self.scan_dialog.exec_() == QDialog.Rejected:
+                if self._worker:
+                    self._worker.stop()
+                    self.scan_dialog.log("Đang dừng quét...", False)
+            return
+
         self._worker.start()
         av_log(f"User started scan mode={mode}, path={custom_path}")
 
@@ -19637,6 +19742,42 @@ def kbm_apply_dwm_zerobuffer() -> bool:
     ok &= _kbm_reg_set(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad", "AAPThreshold", 0, winreg.REG_DWORD)
     return ok
 
+
+def kbm_apply_deep_boost_windows():
+    if not IS_WINDOWS:
+        return
+    import subprocess
+
+    # 1. Tắt Telemetry
+    _kbm_reg_set(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", "AllowTelemetry", 0, winreg.REG_DWORD)
+
+    # 2. Tối ưu TCP/IP Network
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'autotuninglevel=normal'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'chimney=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'dca=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'netdma=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'ecncapability=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+
+    # 3. Kích hoạt Ultimate Performance Power Plan
+    subprocess.run(['powercfg', '-duplicatescheme', 'e9a42b02-d5df-448d-aa00-03f14749eb61'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+
+    # 4. Tắt Nagle's Algorithm (giảm MS trong game)
+    interfaces = r"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, interfaces, 0, winreg.KEY_READ) as k:
+            i = 0
+            while True:
+                try:
+                    sub_name = winreg.EnumKey(k, i)
+                    _kbm_reg_set(winreg.HKEY_LOCAL_MACHINE, f"{interfaces}\\{sub_name}", "TcpAckFrequency", 1, winreg.REG_DWORD)
+                    _kbm_reg_set(winreg.HKEY_LOCAL_MACHINE, f"{interfaces}\\{sub_name}", "TCPNoDelay", 1, winreg.REG_DWORD)
+                    i += 1
+                except OSError:
+                    break
+    except:
+        pass
+
+
 def kbm_apply_gaming_scheduling() -> bool:
     """Nâng mức ưu tiên ngắt CPU cho chuột & phím khi chơi game (Win32Priority 38 / Games High)."""
     if not IS_WINDOWS:
@@ -19850,7 +19991,11 @@ class KbmDeepOptimizeWorker(QThread):
 
     def _pass_sched(self) -> Tuple[bool, str]:
         kbm_apply_gaming_scheduling()
-        return True, "Đã gán Win32PrioritySeparation 38 (Short High) cho Games & CSRSS"
+        try:
+            kbm_apply_deep_boost_windows()
+        except:
+            pass
+        return True, "Đã gán Win32PrioritySeparation 38 (Short High) cho Games, tối ưu TCP/IP & Ultimate Performance"
 
     def _pass_kb(self) -> Tuple[bool, str]:
         kbm_apply_keyboard_filterkeys(150, 6)
