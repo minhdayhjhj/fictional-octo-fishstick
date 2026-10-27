@@ -73,7 +73,7 @@ except Exception:
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MACOS = sys.platform.startswith("darwin")
-DEMO_MODE = not IS_WINDOWS
+DEMO_MODE = False
 
 if IS_WINDOWS:
     try:
@@ -88,6 +88,38 @@ APP_VERSION = "3.0.0"
 APP_TAGLINE = "Siêu dọn rác. Sạch đến từng cache. Máy nhẹ như mới."
 APP_COMPANY = "CleanMaster Labs"
 SIDEBAR_COUNT = 10          # số trang trên thanh trái (0..9); module Pro nằm sau
+
+# ============================================================ I18N =======
+TRANSLATIONS = {
+    "Tổng quan": "Dashboard",
+    "Cài đặt": "Settings",
+    "Giới thiệu": "About",
+    "Dọn dẹp": "Clean",
+    "Quét rác": "Scan Junk",
+    "Siêu dọn rác": "Super Clean",
+    "Rác hệ thống": "System Junk",
+    "Trình duyệt & riêng tư": "Browser & Privacy",
+    "Registry & Khởi động": "Registry & Startup",
+    "Công cụ nâng cao": "Advanced Tools",
+    "Lịch sử dọn dẹp": "Clean History",
+    "Ngôn ngữ": "Language",
+    "DỌN DẸP & TỐI ƯU": "CLEAN & OPTIMIZE",
+    "CÔNG CỤ & BẢO VỆ": "TOOLS & PROTECTION",
+    "KHÁC": "OTHERS",
+    "Đồng ý": "Agree",
+    "Hủy": "Cancel",
+    "Cảnh báo": "Warning",
+    "Thành công": "Success",
+    "Lỗi": "Error",
+    "Tiếng Việt": "Vietnamese",
+    "Tiếng Anh": "English",
+}
+
+def T(text: str) -> str:
+    if SETTINGS.get("language", "vi") == "en":
+        return TRANSLATIONS.get(text, text)
+    return text
+
 
 # ============================================================ PALETTE =====
 C_BG = QColor("#080C12")          # nền sâu nhất (đậm hơn, sang hơn)
@@ -676,6 +708,7 @@ class SettingsStore:
         "schedule_minutes": 0,       # 0 = tắt hẹn giờ dọn tự động
         "run_on_startup": False,     # khởi động cùng Windows
         "history_keep": 100,         # số bản ghi lịch sử tối đa
+        "language": "vi",
         # ---- runtime keys (đã có sẵn từ trước, nay đưa vào DEFAULTS để reset đúng) ----
         "last_page": 0,              # trang cuối người dùng mở
         "nav_layout": 2,             # 2 = đã chèn trang Siêu dọn rác ở vị trí 4
@@ -1921,21 +1954,21 @@ class Sidebar(QWidget):
         self.nav_lay.setContentsMargins(0, 0, 0, 0)
         self.nav_lay.setSpacing(3)
 
-        self._group_lbl("DỌN DẸP & TỐI ƯU", self.nav_lay)
-        self._add("Tổng quan", "gauge")
-        self._add("Dọn thông minh", "broom")
-        self._add("Rác hệ thống", "trash")
-        self._add("Trình duyệt & riêng tư", "globe")
-        self._add("Siêu dọn rác", "lightning")
-        self._add("Registry & Khởi động", "registry")
+        self._group_lbl(T("DỌN DẸP & TỐI ƯU"), self.nav_lay)
+        self._add(T("Tổng quan"), "gauge")
+        self._add(T("Dọn thông minh"), "broom")
+        self._add(T("Rác hệ thống"), "trash")
+        self._add(T("Trình duyệt & riêng tư"), "globe")
+        self._add(T("Siêu dọn rác"), "lightning")
+        self._add(T("Registry & Khởi động"), "registry")
         self.nav_lay.addSpacing(8)
-        self._group_lbl("CÔNG CỤ & BẢO VỆ", self.nav_lay)
-        self._add("Công cụ nâng cao", "wrench")
+        self._group_lbl(T("CÔNG CỤ & BẢO VỆ"), self.nav_lay)
+        self._add(T("Công cụ nâng cao"), "wrench")
         self.nav_lay.addSpacing(8)
-        self._group_lbl("KHÁC", self.nav_lay)
-        self._add("Lịch sử dọn dẹp", "clock")
-        self._add("Cài đặt", "gear")
-        self._add("Giới thiệu", "info")
+        self._group_lbl(T("KHÁC"), self.nav_lay)
+        self._add(T("Lịch sử dọn dẹp"), "clock")
+        self._add(T("Cài đặt"), "gear")
+        self._add(T("Giới thiệu"), "info")
         self.nav_lay.addStretch(1)
 
         scroll.setWidget(nav_host)
@@ -5069,36 +5102,7 @@ def clean_target(t: TargetDef, dry_run: bool) -> Tuple[int, int, int]:
     return freed, deleted, failed
 
 
-# ------------------------------------------------- DEMO (không Windows) --
-_DEMO_SIZE = {
-    "temp_user": (180, 1400), "temp_win": (60, 500), "prefetch": (8, 60),
-    "recycle": (400, 4200), "wupdate": (200, 2600), "delivery_opt": (150, 900),
-    "dumps": (250, 1200), "minidumps": (30, 100), "wer": (12, 90),
-    "thumbs": (25, 160), "icon_cache": (8, 30), "win_logs": (45, 300),
-    "dx_shader": (90, 700), "win_old": (0, 0), "inet_temp": (30, 250),
-    "font_cache": (15, 40), "store_cache": (60, 400), "error_dumps": (70, 350),
-    "chrome_cache": (350, 2900), "chrome_cookies": (2, 15), "chrome_history": (30, 120),
-    "edge_cache": (280, 2200), "edge_cookies": (1.5, 10), "firefox_cache": (150, 1100),
-    "opera_cache": (80, 600), "brave_cache": (100, 750), "vivaldi_cache": (0, 0),
-    "dns_cache": (0, 0), "recent_files": (1, 40), "jump_lists": (2, 25),
-    "clipboard": (0, 0), "browser_crash": (5, 20), "run_mru": (0, 0),
-    "office_cache": (40, 200), "typed_paths": (0, 0),
-    # --- Deep Scan V2 ---
-    "installer_logs": (30, 180), "directx_cache": (120, 900),
-    "printer_spool": (1, 20), "thumb_cache_ext": (20, 120),
-    "git_cache": (10, 80), "android_studio_cache": (50, 400),
-    "docker_cache": (40, 300), "jetbrains_cache": (60, 500),
-    "vmware_vbox_logs": (15, 100), "nvidia_installer_cache": (300, 1800),
-    "edge_webview2_deep": (80, 600), "windows_search_cache": (200, 1200),
-    "hibernation_old": (0, 0), "directx_setup_log": (10, 60),
-}
 
-
-def demo_scan_target(t: TargetDef):
-    lo, hi = _DEMO_SIZE.get(t.tid, (10, 100))
-    mb = random.uniform(lo, hi)
-    files = int(mb * random.uniform(6, 30))
-    return int(mb * 1024 * 1024), files, []
 
 
 # ----------------------------------------------- REGISTRY: khởi động ----
@@ -5658,21 +5662,6 @@ def compute_health(junk_bytes: int, stats: dict = None) -> int:
 
 
 # ------------------------------------------------------- DEMO registry --
-def demo_registry_issues() -> List[dict]:
-    samples = [
-        ("Gỡ cài đặt", "HKLM\\...\\Uninstall\\SomeApp", "SomeApp Toolbar",
-         "Trình gỡ cài đặt không tồn tại trên đĩa"),
-        ("MUI Cache", "HKCU\\...\\MuiCache", "C:\\Games\\Old\\game.exe",
-         "Ứng dụng không còn tồn tại"),
-        ("SharedDLLs", "HKLM\\...\\SharedDLLs", "C:\\Program Files\\X\\y.dll",
-         "DLL không tồn tại trên đĩa"),
-        ("App Paths", "HKLM\\...\\App Paths\\old.exe", "C:\\old\\old.exe",
-         "Đường dẫn exe không tồn tại"),
-        ("Khởi động", "HKCU\\...\\Run", "DeadApp",
-         "Chương trình khởi động không tồn tại"),
-    ]
-    return [{"area": a, "key": k, "value": v, "problem": p, "fix": None}
-            for a, k, v, p in random.sample(samples, k=random.randint(3, 5))]
 
 
 # ============================================================ WORKERS ====
@@ -5695,19 +5684,10 @@ class ScanWorker(QThread):
         try:
             for t in self.targets:
                 self.sig_stage.emit(t.name)
-                if DEMO_MODE:
-                    b, n, files = demo_scan_target(t)
-                    # Mô phỏng nhịp tim tăng dần cho sống động
-                    for k in range(3):
-                        self.sig_heartbeat.emit(t.tid, int(n * (k + 1) / 3),
-                                                int(b * (k + 1) / 3))
-                        self.msleep(random.randint(30, 70))
-                    self.msleep(random.randint(50, 130))
-                else:
-                    try:
-                        b, n, files = scan_target(t)
-                    except Exception:
-                        b, n, files = 0, 0, []
+                try:
+                    b, n, files = scan_target(t)
+                except Exception:
+                    b, n, files = 0, 0, []
                 total_b += b
                 total_f += n
                 self.sig_target.emit(t.tid, b, n)
@@ -5733,22 +5713,10 @@ class CleanWorker(QThread):
         try:
             for i, t in enumerate(self.targets):
                 self.sig_progress.emit(int((i + 1) / n * 100), t.name)
-                if DEMO_MODE:
-                    lo, hi = _DEMO_SIZE.get(t.tid, (10, 100))
-                    mb = random.uniform(lo, hi)
-                    freed = int(mb * 1024 * 1024)
-                    files = int(mb * random.uniform(6, 30))
-                    self.msleep(random.randint(40, 110))
-                    if not self.dry_run:
-                        total_freed += freed
-                        total_del += files
-                    self.sig_target_done.emit(t.tid, freed if not self.dry_run else 0,
-                                              files if not self.dry_run else 0, 0)
-                else:
-                    try:
-                        freed, deleted, failed = clean_target(t, self.dry_run)
-                    except Exception:
-                        freed, deleted, failed = 0, 0, 1
+                try:
+                    freed, deleted, failed = clean_target(t, self.dry_run)
+                except Exception:
+                    freed, deleted, failed = 0, 0, 1
                     total_freed += freed
                     total_del += deleted
                     total_fail += failed
@@ -5779,11 +5747,7 @@ class RegistryScanWorker(QThread):
         super().__init__(parent)
 
     def run(self):
-        if DEMO_MODE:
-            self.msleep(900)
-            self.sig_done.emit(demo_registry_issues())
-        else:
-            self.sig_done.emit(registry_scan_issues())
+        self.sig_done.emit(registry_scan_issues())
 
 
 class RegistryFixWorker(QThread):
@@ -10252,7 +10216,7 @@ class SettingsPage(QWidget):
         root.setContentsMargins(34, 26, 34, 26)
         root.setSpacing(14)
 
-        header = PageHeader("gear", "Cài đặt",
+        header = PageHeader("gear", T("Cài đặt"),
                             "Tinh chỉnh hành vi của CleanMaster Pro theo ý bạn")
         root.addWidget(header)
 
@@ -10263,6 +10227,27 @@ class SettingsPage(QWidget):
         col = QVBoxLayout(host)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
+
+        col.addWidget(self._sec(T("Ngôn ngữ")))
+
+        lang_lay = QHBoxLayout()
+        lang_lbl = QLabel(T("Ngôn ngữ"))
+        lang_lbl.setStyleSheet("color: #EAF2F8; font-size: 13px; font-weight: 600;")
+        self.lang_cb = QComboBox()
+        self.lang_cb.addItem(T("Tiếng Việt"), "vi")
+        self.lang_cb.addItem(T("Tiếng Anh"), "en")
+
+        cur_lang = SETTINGS.get("language", "vi")
+        idx = self.lang_cb.findData(cur_lang)
+        if idx >= 0:
+            self.lang_cb.setCurrentIndex(idx)
+
+        self.lang_cb.currentIndexChanged.connect(self._on_lang_changed)
+        lang_lay.addWidget(lang_lbl)
+        lang_lay.addWidget(self.lang_cb)
+        lang_lay.addStretch(1)
+
+        col.addLayout(lang_lay)
 
         col.addWidget(self._sec("An toàn"))
         self.row_dry = SettingsRow("Chế độ Dry-run mặc định",
@@ -10353,6 +10338,12 @@ class SettingsPage(QWidget):
         scroll.setWidget(host)
         root.addWidget(scroll, 1)
 
+
+    def _on_lang_changed(self, idx):
+        lang_code = self.lang_cb.itemData(idx)
+        SETTINGS["language"] = lang_code
+        save_settings()
+        QMessageBox.information(self, T("Khởi động lại"), T("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
     def _sec(self, title: str) -> QLabel:
         l = QLabel(title.upper())
         l.setProperty("role", "h3")
@@ -13025,14 +13016,6 @@ class RamGlowButton(GlowButton):
             self._glow.setColor(QColor(183, 156, 255, int(90 + s * 110)))
 
 
-DEMO_PROCS = [
-    ("chrome.exe", 812, 420), ("msedge.exe", 1044, 310),
-    ("Code.exe", 2210, 285), ("Discord.exe", 3300, 240),
-    ("steam.exe", 1520, 195), ("explorer.exe", 984, 160),
-    ("spotify.exe", 4102, 145), ("python.exe", 6601, 138),
-    ("SearchIndexer.exe", 2311, 96), ("OneDrive.exe", 3810, 88),
-    ("svchost.exe", 1024, 74), ("winlogon.exe", 700, 12),
-]
 
 
 class RamCleanerPage(QWidget):
@@ -16785,6 +16768,24 @@ def av_add_whitelist(item: str) -> bool:
         return False
 
 
+
+def calculate_entropy(fpath: str) -> float:
+    try:
+        with open(fpath, "rb") as f:
+            data = f.read(1024 * 1024 * 5)
+        if not data:
+            return 0.0
+        import math
+        from collections import Counter
+        entropy = 0.0
+        length = len(data)
+        for count in Counter(data).values():
+            p = count / length
+            entropy -= p * math.log2(p)
+        return entropy
+    except Exception:
+        return 0.0
+
 def file_sha256(fpath: str, max_mb: int = 150) -> str:
     """Tính mã băm SHA256 với bộ đệm 64KB, an toàn với tệp lớn."""
     try:
@@ -17872,6 +17873,21 @@ class AvScanWorker(QThread):
                                     continue
                                 sha = file_sha256(fpath)
                                 
+
+                                # 3. Kiểm tra Shannon Entropy (Heuristic cho Packer / Crypter)
+                                if is_exe_ext and sz < 1024 * 1024 * 15:
+                                    ent = calculate_entropy(fpath)
+                                    if ent > 7.9:
+                                        t = {
+                                            "type": "file", "category": "Heuristic Entropy",
+                                            "severity": "HIGH", "name": "Suspicious.HighEntropy.Packer",
+                                            "path": fpath, "reason": f"Tệp tin có độ hỗn loạn bất thường (Entropy: {ent:.2f}), nghi ngờ bị mã hóa hoặc dùng Packer/Crypter",
+                                            "size": sz, "sha256": sha,
+                                        }
+                                        self._all_threats.append(t)
+                                        self.sig_threat.emit(t)
+                                        continue
+
                                 # So khớp SHA256 DB
                                 if sha and sha in db:
                                     t = {
