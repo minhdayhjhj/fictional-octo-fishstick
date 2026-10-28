@@ -4191,6 +4191,13 @@ TARGETS: List[TargetDef] = [
                _P("%SystemRoot%/LiveKernelReports", None, True)]),
     TargetDef("minidumps", "Minidump lỗi", "Các bản dump nhỏ mỗi lần hệ thống gặp lỗi nghiêm trọng",
               "system", "safe", "file", [_P("%SystemRoot%/Minidump", ["*.dmp"], False)]),
+
+    TargetDef("event_logs", "Event Logs", "Dọn dẹp nhật ký hệ thống Windows Event Viewer",
+              "system", "care", "file", [], special="event_logs", default_on=False),
+    TargetDef("error_logs", "Error Logs", "Dọn dẹp nhật ký báo cáo lỗi ứng dụng",
+              "system", "care", "file", [_P("%SystemRoot%/System32/winevt/Logs", ["*.evtx"], False)], default_on=False),
+    TargetDef("directx_cache", "DirectX Shader Cache", "Bộ đệm đồ họa, xóa để giải phóng bộ nhớ GPU",
+              "system", "safe", "file", [_P("%LOCALAPPDATA%/D3DSCache", None, True), _P("%LOCALAPPDATA%/NVIDIA/GLCache", None, True), _P("%LOCALAPPDATA%/AMD/DxCache", None, True)], default_on=False),
     TargetDef("dns_cache", "DNS Cache", "Xóa bộ nhớ đệm phân giải tên miền (DNS) của Windows",
               "system", "safe", "net", [], special="dns_flush"),
     TargetDef("winsock", "Winsock Reset", "Khôi phục Winsock Catalog về trạng thái gốc để sửa lỗi mạng",
@@ -16832,6 +16839,104 @@ def shannon_entropy(data: bytes) -> float:
     return entropy
 
 
+def is_file_signed(filepath: str) -> bool:
+    """Kiểm tra tệp PE có chữ ký số Authenticode hợp lệ hay không bằng WinVerifyTrust."""
+    if not IS_WINDOWS or not os.path.isfile(filepath):
+        return False
+    try:
+        from ctypes import wintypes
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", wintypes.BYTE * 8)
+            ]
+        class _WINTRUST_FILE_INFO(ctypes.Structure):
+            _fields_ = [
+                ("cbStruct", wintypes.DWORD),
+                ("pcwszFilePath", wintypes.LPCWSTR),
+                ("hFile", wintypes.HANDLE),
+                ("pgKnownSubject", ctypes.c_void_p)
+            ]
+        class _WINTRUST_DATA(ctypes.Structure):
+            _fields_ = [
+                ("cbStruct", wintypes.DWORD),
+                ("pPolicyCallbackData", ctypes.c_void_p),
+                ("pSIPClientData", ctypes.c_void_p),
+                ("dwUIChoice", wintypes.DWORD),
+                ("fdwRevocationChecks", wintypes.DWORD),
+                ("dwUnionChoice", wintypes.DWORD),
+                ("pFile", ctypes.POINTER(_WINTRUST_FILE_INFO)),
+                ("dwStateAction", wintypes.DWORD),
+                ("hWVTStateData", wintypes.HANDLE),
+                ("pwszURLReference", wintypes.LPCWSTR),
+                ("dwProvFlags", wintypes.DWORD),
+                ("dwUIContext", wintypes.DWORD),
+                ("pSignatureSettings", ctypes.c_void_p)
+            ]
+
+        ACTION_VERIFY = _GUID(
+            0x00aac56b, 0xcd44, 0x11d0,
+            (wintypes.BYTE * 8)(0x8c, 0xc2, 0x00, 0xc0, 0x4f, 0xc2, 0x95, 0xee)
+        )
+        file_info = _WINTRUST_FILE_INFO()
+        file_info.cbStruct = ctypes.sizeof(_WINTRUST_FILE_INFO)
+        file_info.pcwszFilePath = filepath
+        file_info.hFile = None
+        file_info.pgKnownSubject = None
+
+        trust_data = _WINTRUST_DATA()
+        trust_data.cbStruct = ctypes.sizeof(_WINTRUST_DATA)
+        trust_data.dwUIChoice = 2  # WTD_UI_NONE
+        trust_data.fdwRevocationChecks = 0
+        trust_data.dwUnionChoice = 1  # WTD_CHOICE_FILE
+        trust_data.pFile = ctypes.pointer(file_info)
+        trust_data.dwStateAction = 1  # WTD_STATEACTION_VERIFY
+        trust_data.dwProvFlags = 0x00000080  # WTD_CACHE_ONLY_URL_RETRIEVAL
+
+        wintrust = ctypes.windll.wintrust
+        ret = wintrust.WinVerifyTrust(None, ctypes.byref(ACTION_VERIFY), ctypes.byref(trust_data))
+        trust_data.dwStateAction = 2  # WTD_STATEACTION_CLOSE
+        wintrust.WinVerifyTrust(None, ctypes.byref(ACTION_VERIFY), ctypes.byref(trust_data))
+        return ret == 0
+    except Exception:
+        return False
+
+
+def has_embedded_pe_signature(filepath: str) -> bool:
+    """Kiểm tra nhanh xem PE header có Security Certificate Table (Authenticode) hay không."""
+    try:
+        with open(filepath, "rb") as f:
+            header = f.read(1024)
+        if len(header) < 64 or header[:2] != b"MZ":
+            return False
+        pe_offset = int.from_bytes(header[0x3C:0x40], byteorder="little")
+        if pe_offset + 0x18 + 0x60 > len(header):
+            return False
+        magic = int.from_bytes(header[pe_offset + 0x18 : pe_offset + 0x1A], byteorder="little")
+        sec_dir_offset = (pe_offset + 0x18 + 0x80) if magic == 0x20B else (pe_offset + 0x18 + 0x70)
+        if sec_dir_offset + 8 <= len(header):
+            va = int.from_bytes(header[sec_dir_offset : sec_dir_offset + 4], byteorder="little")
+            sz = int.from_bytes(header[sec_dir_offset + 4 : sec_dir_offset + 8], byteorder="little")
+            return va > 0 and sz > 0
+    except Exception:
+        pass
+    return False
+
+
+def is_trusted_or_signed_pe(filepath: str) -> bool:
+    """Kiểm tra tệp PE có chữ ký số Authenticode hợp lệ hoặc thuộc nhà cung cấp uy tín."""
+    try:
+        if is_file_signed(filepath):
+            return True
+        if has_embedded_pe_signature(filepath):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def is_valid_pe_binary(fpath: str) -> bool:
     """Kiểm tra tệp có đúng cấu trúc PE thực thi chuẩn (Header MZ 0x4D5A và signature PE\\0\\0) không."""
     try:
@@ -17543,6 +17648,8 @@ def av_scan_mbr_bootkit() -> List[dict]:
                     nonzero_code = sum(1 for b in boot_code if b != 0)
                     part_table = data[446:510]
                     has_partition = any(b != 0 for b in part_table)
+                    # Chuẩn UEFI / GPT quy định Sector 0 là Protective MBR với Type=0xEE và Boot Code để trống (toàn 0x00)
+                    is_gpt = any(part_table[i * 16 + 4] == 0xEE for i in range(4))
                     if not sig_ok:
                         threats.append({
                             "type": "bootkit", "category": "MBR Bootkit",
@@ -17551,7 +17658,7 @@ def av_scan_mbr_bootkit() -> List[dict]:
                             "reason": "MBR thiếu chữ ký kết thúc 0x55AA chuẩn — nghi vấn Bootkit ghi đè vùng khởi động",
                             "size": 512, "sha256": hashlib.sha256(data).hexdigest(),
                         })
-                    elif nonzero_code < 32 and has_partition:
+                    elif not is_gpt and nonzero_code < 32 and has_partition:
                         threats.append({
                             "type": "bootkit", "category": "MBR Bootkit",
                             "severity": "HIGH", "name": "Bootkit.MBR.CodeWiped",
@@ -17754,23 +17861,44 @@ def av_scan_ads_and_hidden_procs() -> List[dict]:
 
     # 2. Đối chiếu tiến trình: psutil vs tasklist — phát hiện process ẩn
     try:
-        ps_pids = set(psutil.pids()) if psutil else set()
-        tl_pids = set()
-        rc, out = run_cmd(["tasklist", "/fo", "csv", "/nh"], timeout=20)
-        if rc == 0 and out:
-            for ln in out.splitlines():
-                parts = [p.strip('"') for p in ln.split('","')]
-                if len(parts) >= 2 and parts[1].isdigit():
-                    tl_pids.add(int(parts[1]))
-        hidden = tl_pids - ps_pids if (ps_pids and tl_pids) else set()
-        for pid in list(hidden)[:20]:
-            threats.append({
-                "type": "rootkit", "category": "Hidden Process",
-                "severity": "HIGH", "name": f"Rootkit.HiddenProcess.PID_{pid}",
-                "path": f"PID {pid}",
-                "reason": f"Tiến trình PID {pid} xuất hiện trong tasklist nhưng ẩn khỏi psutil — dấu hiệu rootkit giấu tiến trình",
-                "size": 0, "sha256": "",
-            })
+        if psutil:
+            ps_pids = set(psutil.pids())
+            tl_procs = {}
+            rc, out = run_cmd(["tasklist", "/fo", "csv", "/nh"], timeout=20)
+            if rc == 0 and out:
+                for ln in out.splitlines():
+                    parts = [p.strip('"') for p in ln.split('","')]
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        tl_procs[int(parts[1])] = parts[0].strip().lower()
+
+            self_pids = {os.getpid()}
+            ignored_names = {"tasklist.exe", "cmd.exe", "conhost.exe", "powershell.exe", "python.exe", "wmic.exe"}
+            candidate_hidden = set(tl_procs.keys()) - ps_pids - self_pids
+
+            for pid in list(candidate_hidden)[:20]:
+                pname = tl_procs.get(pid, "")
+                if pname in ignored_names:
+                    continue
+                # 1. Kiểm tra lại: Nếu psutil đã nhìn thấy thì không phải bị ẩn (chỉ là sinh sau lần lấy snapshot trước)
+                if psutil.pid_exists(pid):
+                    continue
+                # 2. Kiểm tra Win32 handle: Nếu không mở được do Process đã kết thúc (transient process) thì bỏ qua
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+                if not h_proc:
+                    # Tiến trình đã kết thúc ngay sau khi tasklist chạy, không phải rootkit
+                    continue
+                ctypes.windll.kernel32.CloseHandle(h_proc)
+                # 3. Chờ 1 nhịp và xác thực lần cuối: Nếu tiến trình vẫn tồn tại mà psutil kiên quyết không thấy
+                time.sleep(0.1)
+                if not psutil.pid_exists(pid):
+                    threats.append({
+                        "type": "rootkit", "category": "Hidden Process",
+                        "severity": "HIGH", "name": f"Rootkit.HiddenProcess.PID_{pid}",
+                        "path": f"PID {pid} ({pname})",
+                        "reason": f"Tiến trình {pname} (PID {pid}) đang chạy nhưng bị ẩn khỏi danh sách liệt kê chuẩn — dấu hiệu rootkit giấu tiến trình",
+                        "size": 0, "sha256": "",
+                    })
     except Exception as ex:
         av_log(f"Hidden process check skipped: {ex}")
 
@@ -17986,15 +18114,17 @@ class AvScanWorker(QThread):
                                 if is_exe_ext and sz < 1024 * 1024 * 15:
                                     ent = calculate_entropy(fpath)
                                     if ent > 7.9:
-                                        t = {
-                                            "type": "file", "category": "Heuristic Entropy",
-                                            "severity": "HIGH", "name": "Suspicious.HighEntropy.Packer",
-                                            "path": fpath, "reason": f"Tệp tin có độ hỗn loạn bất thường (Entropy: {ent:.2f}), nghi ngờ bị mã hóa hoặc dùng Packer/Crypter",
-                                            "size": sz, "sha256": sha,
-                                        }
-                                        self._all_threats.append(t)
-                                        self.sig_threat.emit(t)
-                                        continue
+                                        # Bỏ qua nếu tệp có chữ ký số Authenticode hợp lệ (Lenovo, Microsoft, v.v.)
+                                        if not is_trusted_or_signed_pe(fpath):
+                                            t = {
+                                                "type": "file", "category": "Heuristic Entropy",
+                                                "severity": "HIGH", "name": "Suspicious.HighEntropy.Packer",
+                                                "path": fpath, "reason": f"Tệp tin không có chữ ký số và có độ hỗn loạn bất thường (Entropy: {ent:.2f}), nghi ngờ bị mã hóa hoặc dùng Packer/Crypter",
+                                                "size": sz, "sha256": sha,
+                                            }
+                                            self._all_threats.append(t)
+                                            self.sig_threat.emit(t)
+                                            continue
 
                                 # So khớp SHA256 DB
                                 if sha and sha in db:
@@ -18044,7 +18174,7 @@ class AvScanWorker(QThread):
                                         with open(fpath, "rb") as f:
                                             sample_bytes = f.read(65536)
                                         ent = shannon_entropy(sample_bytes)
-                                        if ent >= 7.82: # Ngưỡng chuẩn cho packed/encrypted crypter binary
+                                        if ent >= 7.82 and not is_trusted_or_signed_pe(fpath): # Ngưỡng chuẩn cho packed/encrypted crypter binary (bỏ qua tệp có chữ ký số)
                                             t = {
                                                 "type": "file", "category": "High Entropy PE",
                                                 "severity": "HIGH", "name": f"Heuristic.PackedBinary.Entropy_{ent:.2f}",
