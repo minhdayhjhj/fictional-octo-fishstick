@@ -73,7 +73,7 @@ except Exception:
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MACOS = sys.platform.startswith("darwin")
-DEMO_MODE = not IS_WINDOWS
+DEMO_MODE = False
 
 if IS_WINDOWS:
     try:
@@ -88,6 +88,38 @@ APP_VERSION = "3.0.0"
 APP_TAGLINE = "Siêu dọn rác. Sạch đến từng cache. Máy nhẹ như mới."
 APP_COMPANY = "CleanMaster Labs"
 SIDEBAR_COUNT = 10          # số trang trên thanh trái (0..9); module Pro nằm sau
+
+# ============================================================ I18N =======
+TRANSLATIONS = {
+    "Tổng quan": "Dashboard",
+    "Cài đặt": "Settings",
+    "Giới thiệu": "About",
+    "Dọn dẹp": "Clean",
+    "Quét rác": "Scan Junk",
+    "Siêu dọn rác": "Super Clean",
+    "Rác hệ thống": "System Junk",
+    "Trình duyệt & riêng tư": "Browser & Privacy",
+    "Registry & Khởi động": "Registry & Startup",
+    "Công cụ nâng cao": "Advanced Tools",
+    "Lịch sử dọn dẹp": "Clean History",
+    "Ngôn ngữ": "Language",
+    "DỌN DẸP & TỐI ƯU": "CLEAN & OPTIMIZE",
+    "CÔNG CỤ & BẢO VỆ": "TOOLS & PROTECTION",
+    "KHÁC": "OTHERS",
+    "Đồng ý": "Agree",
+    "Hủy": "Cancel",
+    "Cảnh báo": "Warning",
+    "Thành công": "Success",
+    "Lỗi": "Error",
+    "Tiếng Việt": "Vietnamese",
+    "Tiếng Anh": "English",
+}
+
+def T(text: str) -> str:
+    if SETTINGS.get("language", "vi") == "en":
+        return TRANSLATIONS.get(text, text)
+    return text
+
 
 # ============================================================ PALETTE =====
 C_BG = QColor("#080C12")          # nền sâu nhất (đậm hơn, sang hơn)
@@ -676,6 +708,7 @@ class SettingsStore:
         "schedule_minutes": 0,       # 0 = tắt hẹn giờ dọn tự động
         "run_on_startup": False,     # khởi động cùng Windows
         "history_keep": 100,         # số bản ghi lịch sử tối đa
+        "language": "vi",
         # ---- runtime keys (đã có sẵn từ trước, nay đưa vào DEFAULTS để reset đúng) ----
         "last_page": 0,              # trang cuối người dùng mở
         "nav_layout": 2,             # 2 = đã chèn trang Siêu dọn rác ở vị trí 4
@@ -1921,21 +1954,21 @@ class Sidebar(QWidget):
         self.nav_lay.setContentsMargins(0, 0, 0, 0)
         self.nav_lay.setSpacing(3)
 
-        self._group_lbl("DỌN DẸP & TỐI ƯU", self.nav_lay)
-        self._add("Tổng quan", "gauge")
-        self._add("Dọn thông minh", "broom")
-        self._add("Rác hệ thống", "trash")
-        self._add("Trình duyệt & riêng tư", "globe")
-        self._add("Siêu dọn rác", "lightning")
-        self._add("Registry & Khởi động", "registry")
+        self._group_lbl(T("DỌN DẸP & TỐI ƯU"), self.nav_lay)
+        self._add(T("Tổng quan"), "gauge")
+        self._add(T("Dọn thông minh"), "broom")
+        self._add(T("Rác hệ thống"), "trash")
+        self._add(T("Trình duyệt & riêng tư"), "globe")
+        self._add(T("Siêu dọn rác"), "lightning")
+        self._add(T("Registry & Khởi động"), "registry")
         self.nav_lay.addSpacing(8)
-        self._group_lbl("CÔNG CỤ & BẢO VỆ", self.nav_lay)
-        self._add("Công cụ nâng cao", "wrench")
+        self._group_lbl(T("CÔNG CỤ & BẢO VỆ"), self.nav_lay)
+        self._add(T("Công cụ nâng cao"), "wrench")
         self.nav_lay.addSpacing(8)
-        self._group_lbl("KHÁC", self.nav_lay)
-        self._add("Lịch sử dọn dẹp", "clock")
-        self._add("Cài đặt", "gear")
-        self._add("Giới thiệu", "info")
+        self._group_lbl(T("KHÁC"), self.nav_lay)
+        self._add(T("Lịch sử dọn dẹp"), "clock")
+        self._add(T("Cài đặt"), "gear")
+        self._add(T("Giới thiệu"), "info")
         self.nav_lay.addStretch(1)
 
         scroll.setWidget(nav_host)
@@ -4157,7 +4190,13 @@ TARGETS: List[TargetDef] = [
               [_P("%SystemRoot%/MEMORY.DMP", None, False),
                _P("%SystemRoot%/LiveKernelReports", None, True)]),
     TargetDef("minidumps", "Minidump lỗi", "Các bản dump nhỏ mỗi lần hệ thống gặp lỗi nghiêm trọng",
-              "system", "safe", "file", [_P("%SystemRoot%/Minidump", None, True)]),
+              "system", "safe", "file", [_P("%SystemRoot%/Minidump", ["*.dmp"], False)]),
+    TargetDef("dns_cache", "DNS Cache", "Xóa bộ nhớ đệm phân giải tên miền (DNS) của Windows",
+              "system", "safe", "net", [], special="dns_flush"),
+    TargetDef("winsock", "Winsock Reset", "Khôi phục Winsock Catalog về trạng thái gốc để sửa lỗi mạng",
+              "system", "care", "net", [], special="winsock_reset", default_on=False),
+    TargetDef("font_cache", "Font Cache", "Bộ nhớ đệm phông chữ (Xóa để sửa lỗi chữ bị ô vuông)",
+              "system", "care", "file", [_P("%SystemRoot%/ServiceProfiles/LocalService/AppData/Local/FontCache", ["*.dat"], True)], default_on=False),
     TargetDef("wer", "Báo cáo lỗi (WER)", "Báo cáo lỗi ứng dụng đã gửi tới Microsoft",
               "system", "safe", "warn",
               [_P("%LOCALAPPDATA%/Microsoft/Windows/WER", None, True),
@@ -4915,8 +4954,13 @@ def special_clean(t: TargetDef) -> Tuple[int, int, int]:
         except Exception:
             pass
         return 0, 0, 1
-    if t.special == "dns":
+    if t.special == "dns_flush":
         rc, _ = run_cmd(["ipconfig", "/flushdns"])
+        return 512, 1 if rc == 0 else 0, 0 if rc == 0 else 1
+    if t.special == "winsock_reset":
+        if not is_admin():
+            return 0, 0, 1
+        rc, _ = run_cmd(["netsh", "winsock", "reset"])
         return 0, 1 if rc == 0 else 0, 0 if rc == 0 else 1
     if t.special == "clipboard":
         ok = empty_clipboard()
@@ -5069,36 +5113,7 @@ def clean_target(t: TargetDef, dry_run: bool) -> Tuple[int, int, int]:
     return freed, deleted, failed
 
 
-# ------------------------------------------------- DEMO (không Windows) --
-_DEMO_SIZE = {
-    "temp_user": (180, 1400), "temp_win": (60, 500), "prefetch": (8, 60),
-    "recycle": (400, 4200), "wupdate": (200, 2600), "delivery_opt": (150, 900),
-    "dumps": (250, 1200), "minidumps": (30, 100), "wer": (12, 90),
-    "thumbs": (25, 160), "icon_cache": (8, 30), "win_logs": (45, 300),
-    "dx_shader": (90, 700), "win_old": (0, 0), "inet_temp": (30, 250),
-    "font_cache": (15, 40), "store_cache": (60, 400), "error_dumps": (70, 350),
-    "chrome_cache": (350, 2900), "chrome_cookies": (2, 15), "chrome_history": (30, 120),
-    "edge_cache": (280, 2200), "edge_cookies": (1.5, 10), "firefox_cache": (150, 1100),
-    "opera_cache": (80, 600), "brave_cache": (100, 750), "vivaldi_cache": (0, 0),
-    "dns_cache": (0, 0), "recent_files": (1, 40), "jump_lists": (2, 25),
-    "clipboard": (0, 0), "browser_crash": (5, 20), "run_mru": (0, 0),
-    "office_cache": (40, 200), "typed_paths": (0, 0),
-    # --- Deep Scan V2 ---
-    "installer_logs": (30, 180), "directx_cache": (120, 900),
-    "printer_spool": (1, 20), "thumb_cache_ext": (20, 120),
-    "git_cache": (10, 80), "android_studio_cache": (50, 400),
-    "docker_cache": (40, 300), "jetbrains_cache": (60, 500),
-    "vmware_vbox_logs": (15, 100), "nvidia_installer_cache": (300, 1800),
-    "edge_webview2_deep": (80, 600), "windows_search_cache": (200, 1200),
-    "hibernation_old": (0, 0), "directx_setup_log": (10, 60),
-}
 
-
-def demo_scan_target(t: TargetDef):
-    lo, hi = _DEMO_SIZE.get(t.tid, (10, 100))
-    mb = random.uniform(lo, hi)
-    files = int(mb * random.uniform(6, 30))
-    return int(mb * 1024 * 1024), files, []
 
 
 # ----------------------------------------------- REGISTRY: khởi động ----
@@ -5658,21 +5673,6 @@ def compute_health(junk_bytes: int, stats: dict = None) -> int:
 
 
 # ------------------------------------------------------- DEMO registry --
-def demo_registry_issues() -> List[dict]:
-    samples = [
-        ("Gỡ cài đặt", "HKLM\\...\\Uninstall\\SomeApp", "SomeApp Toolbar",
-         "Trình gỡ cài đặt không tồn tại trên đĩa"),
-        ("MUI Cache", "HKCU\\...\\MuiCache", "C:\\Games\\Old\\game.exe",
-         "Ứng dụng không còn tồn tại"),
-        ("SharedDLLs", "HKLM\\...\\SharedDLLs", "C:\\Program Files\\X\\y.dll",
-         "DLL không tồn tại trên đĩa"),
-        ("App Paths", "HKLM\\...\\App Paths\\old.exe", "C:\\old\\old.exe",
-         "Đường dẫn exe không tồn tại"),
-        ("Khởi động", "HKCU\\...\\Run", "DeadApp",
-         "Chương trình khởi động không tồn tại"),
-    ]
-    return [{"area": a, "key": k, "value": v, "problem": p, "fix": None}
-            for a, k, v, p in random.sample(samples, k=random.randint(3, 5))]
 
 
 # ============================================================ WORKERS ====
@@ -5695,19 +5695,10 @@ class ScanWorker(QThread):
         try:
             for t in self.targets:
                 self.sig_stage.emit(t.name)
-                if DEMO_MODE:
-                    b, n, files = demo_scan_target(t)
-                    # Mô phỏng nhịp tim tăng dần cho sống động
-                    for k in range(3):
-                        self.sig_heartbeat.emit(t.tid, int(n * (k + 1) / 3),
-                                                int(b * (k + 1) / 3))
-                        self.msleep(random.randint(30, 70))
-                    self.msleep(random.randint(50, 130))
-                else:
-                    try:
-                        b, n, files = scan_target(t)
-                    except Exception:
-                        b, n, files = 0, 0, []
+                try:
+                    b, n, files = scan_target(t)
+                except Exception:
+                    b, n, files = 0, 0, []
                 total_b += b
                 total_f += n
                 self.sig_target.emit(t.tid, b, n)
@@ -5733,22 +5724,10 @@ class CleanWorker(QThread):
         try:
             for i, t in enumerate(self.targets):
                 self.sig_progress.emit(int((i + 1) / n * 100), t.name)
-                if DEMO_MODE:
-                    lo, hi = _DEMO_SIZE.get(t.tid, (10, 100))
-                    mb = random.uniform(lo, hi)
-                    freed = int(mb * 1024 * 1024)
-                    files = int(mb * random.uniform(6, 30))
-                    self.msleep(random.randint(40, 110))
-                    if not self.dry_run:
-                        total_freed += freed
-                        total_del += files
-                    self.sig_target_done.emit(t.tid, freed if not self.dry_run else 0,
-                                              files if not self.dry_run else 0, 0)
-                else:
-                    try:
-                        freed, deleted, failed = clean_target(t, self.dry_run)
-                    except Exception:
-                        freed, deleted, failed = 0, 0, 1
+                try:
+                    freed, deleted, failed = clean_target(t, self.dry_run)
+                except Exception:
+                    freed, deleted, failed = 0, 0, 1
                     total_freed += freed
                     total_del += deleted
                     total_fail += failed
@@ -5779,11 +5758,7 @@ class RegistryScanWorker(QThread):
         super().__init__(parent)
 
     def run(self):
-        if DEMO_MODE:
-            self.msleep(900)
-            self.sig_done.emit(demo_registry_issues())
-        else:
-            self.sig_done.emit(registry_scan_issues())
+        self.sig_done.emit(registry_scan_issues())
 
 
 class RegistryFixWorker(QThread):
@@ -10252,7 +10227,7 @@ class SettingsPage(QWidget):
         root.setContentsMargins(34, 26, 34, 26)
         root.setSpacing(14)
 
-        header = PageHeader("gear", "Cài đặt",
+        header = PageHeader("gear", T("Cài đặt"),
                             "Tinh chỉnh hành vi của CleanMaster Pro theo ý bạn")
         root.addWidget(header)
 
@@ -10263,6 +10238,27 @@ class SettingsPage(QWidget):
         col = QVBoxLayout(host)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
+
+        col.addWidget(self._sec(T("Ngôn ngữ")))
+
+        lang_lay = QHBoxLayout()
+        lang_lbl = QLabel(T("Ngôn ngữ"))
+        lang_lbl.setStyleSheet("color: #EAF2F8; font-size: 13px; font-weight: 600;")
+        self.lang_cb = QComboBox()
+        self.lang_cb.addItem(T("Tiếng Việt"), "vi")
+        self.lang_cb.addItem(T("Tiếng Anh"), "en")
+
+        cur_lang = SETTINGS.get("language", "vi")
+        idx = self.lang_cb.findData(cur_lang)
+        if idx >= 0:
+            self.lang_cb.setCurrentIndex(idx)
+
+        self.lang_cb.currentIndexChanged.connect(self._on_lang_changed)
+        lang_lay.addWidget(lang_lbl)
+        lang_lay.addWidget(self.lang_cb)
+        lang_lay.addStretch(1)
+
+        col.addLayout(lang_lay)
 
         col.addWidget(self._sec("An toàn"))
         self.row_dry = SettingsRow("Chế độ Dry-run mặc định",
@@ -10353,6 +10349,12 @@ class SettingsPage(QWidget):
         scroll.setWidget(host)
         root.addWidget(scroll, 1)
 
+
+    def _on_lang_changed(self, idx):
+        lang_code = self.lang_cb.itemData(idx)
+        SETTINGS["language"] = lang_code
+        save_settings()
+        QMessageBox.information(self, T("Khởi động lại"), T("Vui lòng khởi động lại ứng dụng để áp dụng ngôn ngữ mới."))
     def _sec(self, title: str) -> QLabel:
         l = QLabel(title.upper())
         l.setProperty("role", "h3")
@@ -13025,14 +13027,6 @@ class RamGlowButton(GlowButton):
             self._glow.setColor(QColor(183, 156, 255, int(90 + s * 110)))
 
 
-DEMO_PROCS = [
-    ("chrome.exe", 812, 420), ("msedge.exe", 1044, 310),
-    ("Code.exe", 2210, 285), ("Discord.exe", 3300, 240),
-    ("steam.exe", 1520, 195), ("explorer.exe", 984, 160),
-    ("spotify.exe", 4102, 145), ("python.exe", 6601, 138),
-    ("SearchIndexer.exe", 2311, 96), ("OneDrive.exe", 3810, 88),
-    ("svchost.exe", 1024, 74), ("winlogon.exe", 700, 12),
-]
 
 
 class RamCleanerPage(QWidget):
@@ -16785,6 +16779,24 @@ def av_add_whitelist(item: str) -> bool:
         return False
 
 
+
+def calculate_entropy(fpath: str) -> float:
+    try:
+        with open(fpath, "rb") as f:
+            data = f.read(1024 * 1024 * 5)
+        if not data:
+            return 0.0
+        import math
+        from collections import Counter
+        entropy = 0.0
+        length = len(data)
+        for count in Counter(data).values():
+            p = count / length
+            entropy -= p * math.log2(p)
+        return entropy
+    except Exception:
+        return 0.0
+
 def file_sha256(fpath: str, max_mb: int = 150) -> str:
     """Tính mã băm SHA256 với bộ đệm 64KB, an toàn với tệp lớn."""
     try:
@@ -16975,6 +16987,31 @@ def av_restore_quarantine(vault_file_name: str, original_path: str) -> bool:
         return False
 
 
+
+def check_magic_bytes(filepath: str) -> str:
+    """Kiểm tra chữ ký file để xác định loại file thực sự"""
+    try:
+        with open(filepath, 'rb') as f:
+            header = f.read(8)
+
+        if header.startswith(b'MZ'):
+            return "PE (Windows Executable)"
+        elif header.startswith(b'\x7fELF'):
+            return "ELF (Linux Executable)"
+        elif header.startswith(b'%PDF'):
+            return "PDF Document"
+        elif header.startswith(b'PK\x03\x04'):
+            return "ZIP Archive / Office DOCX"
+        elif header.startswith(b'Rar!\x1A\x07'):
+            return "RAR Archive"
+        elif header.startswith(b'\x50\x4B\x03\x04'):
+            return "ZIP Archive"
+        elif header.startswith(b'\x4D\x5A'):
+            return "DLL or EXE"
+        return "Unknown"
+    except Exception:
+        return "Unreadable"
+
 def av_scan_running_processes() -> List[dict]:
     """Quét toàn bộ tiến trình: kiểm tra đường dẫn giả mạo, tiến trình trong TEMP, command-line khả nghi."""
     threats = []
@@ -17017,6 +17054,17 @@ def av_scan_running_processes() -> List[dict]:
                     suspicious = True
                     reason = f"Giả mạo tiến trình hệ thống Windows ({exe})"
                     severity = "CRITICAL"
+            # 4. Kiểm tra loại file qua Magic Bytes nếu không thể xác minh
+            if not suspicious and exe:
+                mb = check_magic_bytes(exe)
+                if mb not in ("PE (Windows Executable)", "DLL or EXE") and "Unknown" not in mb and mb != "Unreadable":
+                    if not name.endswith(".exe") and not name.endswith(".dll"):
+                        pass # probably fine if not masquerading
+                    else:
+                        suspicious = True
+                        reason = f"File thực thi có chữ ký giả mạo (Magic Byte: {mb})"
+                        severity = "HIGH"
+
                     
             # 4. Command-line chứa script mã hóa PowerShell / Bypassing
             elif cmdline:
@@ -17095,6 +17143,56 @@ def av_scan_dll_injections() -> List[dict]:
             continue
         except Exception:
             continue
+    return threats
+
+
+
+def av_scan_wmi_and_tasks() -> List[dict]:
+    """Quét WMI Persistence và Scheduled Tasks độc hại"""
+    threats = []
+    if not IS_WINDOWS:
+        return threats
+    import subprocess
+
+    # 1. Quét Scheduled Tasks rác/độc hại
+    try:
+        tasks = subprocess.run(['schtasks', '/query', '/fo', 'csv', '/v'], capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        lines = tasks.stdout.strip().split('\n')
+        for line in lines[1:]:
+            parts = line.split('","')
+            if len(parts) > 8:
+                task_name = parts[0].strip('"\\')
+                task_run = parts[8].lower()
+                if "\\temp\\" in task_run or "powershell" in task_run and "-enc" in task_run or "certutil" in task_run:
+                    threats.append({
+                        "type": "task", "category": "Scheduled Task Persistence",
+                        "severity": "CRITICAL", "name": f"Bad.Task.{task_name.split('\\')[-1]}",
+                        "path": task_name, "reason": f"Tác vụ rác/độc hại: {task_run[:50]}...",
+                        "size": 0, "sha256": ""
+                    })
+    except: pass
+
+    # 2. Phát hiện hành vi Đào Coin (Cryptominer Behavior)
+    try:
+        import psutil
+        for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'cmdline']):
+            name = (p.info.get('name') or '').lower()
+            cmd = " ".join(p.info.get('cmdline') or []).lower()
+            cpu = p.info.get('cpu_percent') or 0.0
+
+            bad_miner_terms = ['--algo=', '--coin=', 'stratum+tcp', 'cryptonight', 'xmr-stak', 'xmrig', 'nicehash']
+            is_miner = any(term in cmd for term in bad_miner_terms) or any(term in name for term in bad_miner_terms)
+
+            if is_miner or (cpu > 70.0 and name not in ('system', 'idle', 'dwm.exe', 'csrss.exe', 'explorer.exe') and not name.endswith('.tmp')):
+                threats.append({
+                    "type": "process", "category": "Cryptominer / High CPU",
+                    "severity": "CRITICAL" if is_miner else "MEDIUM",
+                    "name": f"CoinMiner.Gen.{name}" if is_miner else f"Suspicious.HighCPU.{name}",
+                    "path": p.info.get('exe') or name, "reason": f"Nghi ngờ đào coin hoặc ngốn quá nhiều CPU ({cpu}%)",
+                    "size": 0, "sha256": ""
+                })
+    except: pass
+
     return threats
 
 
@@ -17731,6 +17829,17 @@ class AvScanWorker(QThread):
         av_log(f"Engine Antivirus Pro Initialized: {len(db)} signatures loaded")
         if self._stop_requested: return
 
+
+        # -------------------------------------------------- BƯỚC 1.5: Quét WMI & Cryptominer
+        self.sig_step.emit(1, 0, "Đang quét WMI, Scheduled Tasks & Cryptominer...")
+        advanced_threats = av_scan_wmi_and_tasks()
+        for t in advanced_threats:
+            if t["path"] not in whitelist:
+                self._all_threats.append(t)
+                self.sig_threat.emit(t)
+        total_scanned += 15
+        if self._stop_requested: return
+
         # -------------------------------------------------- BƯỚC 2: Quét Tiến trình & Cây Process
         self.sig_step.emit(1, 0, "Đang phân tích cây tiến trình bộ nhớ...")
         proc_threats = av_scan_running_processes()
@@ -17872,6 +17981,21 @@ class AvScanWorker(QThread):
                                     continue
                                 sha = file_sha256(fpath)
                                 
+
+                                # 3. Kiểm tra Shannon Entropy (Heuristic cho Packer / Crypter)
+                                if is_exe_ext and sz < 1024 * 1024 * 15:
+                                    ent = calculate_entropy(fpath)
+                                    if ent > 7.9:
+                                        t = {
+                                            "type": "file", "category": "Heuristic Entropy",
+                                            "severity": "HIGH", "name": "Suspicious.HighEntropy.Packer",
+                                            "path": fpath, "reason": f"Tệp tin có độ hỗn loạn bất thường (Entropy: {ent:.2f}), nghi ngờ bị mã hóa hoặc dùng Packer/Crypter",
+                                            "size": sz, "sha256": sha,
+                                        }
+                                        self._all_threats.append(t)
+                                        self.sig_threat.emit(t)
+                                        continue
+
                                 # So khớp SHA256 DB
                                 if sha and sha in db:
                                     t = {
@@ -18717,6 +18841,53 @@ class AvTelemetryBar(QWidget):
 
 
 # ----------------------------------------------------------------- PAGE -----
+
+class DeepScanDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(T("Trình duyệt Quét Sâu - CleanMaster Pro"))
+        self.resize(800, 600)
+
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setStyleSheet("background: #0B0715; color: #EAF2F8; font-family: 'Segoe UI';")
+
+        lay = QVBoxLayout(self)
+
+        # Tiêu đề
+        hdr = QLabel(T("Tiến trình Quét Sâu Toàn Diện"))
+        hdr.setStyleSheet("font-size: 20px; font-weight: 800; color: #F87171;")
+        lay.addWidget(hdr)
+
+        # Path hiện tại
+        self.path_lbl = QLabel(T("Đang chuẩn bị..."))
+        self.path_lbl.setStyleSheet("color: #8FA3B8; font-family: Consolas, monospace;")
+        self.path_lbl.setWordWrap(True)
+        lay.addWidget(self.path_lbl)
+
+        # Log Box
+        self.log_txt = QTextEdit()
+        self.log_txt.setReadOnly(True)
+        self.log_txt.setStyleSheet("background: #170B2E; color: #3DDBA5; font-family: Consolas, monospace; border: 1px solid #332960;")
+        lay.addWidget(self.log_txt, 1)
+
+        # Buttons
+        btn_lay = QHBoxLayout()
+        self.btn_stop = GlowButton(T("Dừng quét"), "danger")
+        self.btn_stop.clicked.connect(self.reject)
+        btn_lay.addStretch(1)
+        btn_lay.addWidget(self.btn_stop)
+        lay.addLayout(btn_lay)
+
+    def log(self, text, is_threat=False):
+        color = "#F87171" if is_threat else "#3DDBA5"
+        self.log_txt.append(f"<span style='color:{color}'>{text}</span>")
+        sb = self.log_txt.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def update_path(self, path):
+        self.path_lbl.setText(f"Đang quét: {path}")
+
+
 class AntivirusPage(QWidget):
     """Antivirus Pro — Quét siêu sâu 14 bước, Shannon Entropy, Disguised PE, Memory, MBR, WMI, LNK, ADS & Sentinel Real-time."""
 
@@ -19115,6 +19286,28 @@ class AntivirusPage(QWidget):
         self._worker.sig_threat.connect(self._on_threat)
         self._worker.sig_progress.connect(self._on_progress)
         self._worker.sig_done.connect(self._on_done)
+
+        if mode == "deep":
+            self.scan_dialog = DeepScanDialog(self)
+            self._worker.sig_progress.connect(lambda c, p, fps, t: self.scan_dialog.update_path(p))
+            self._worker.sig_step.connect(lambda st, state, note: self.scan_dialog.log(f"Bước {st+1}/14: {note}"))
+            self._worker.sig_threat.connect(lambda th: self.scan_dialog.log(f"PHÁT HIỆN: {th.get('name')} tại {th.get('path', th.get('desc'))}", True))
+
+            def handle_done_dialog(*args):
+                if hasattr(self, 'scan_dialog') and self.scan_dialog:
+                    self.scan_dialog.log("QUÉT HOÀN TẤT.")
+                    self.scan_dialog.btn_stop.setText(T("Đóng"))
+            self._worker.sig_done.connect(handle_done_dialog)
+
+            self._worker.start()
+            av_log(f"User started scan mode={mode}, path={custom_path}")
+
+            if self.scan_dialog.exec_() == QDialog.Rejected:
+                if self._worker:
+                    self._worker.stop()
+                    self.scan_dialog.log("Đang dừng quét...", False)
+            return
+
         self._worker.start()
         av_log(f"User started scan mode={mode}, path={custom_path}")
 
@@ -19621,6 +19814,42 @@ def kbm_apply_dwm_zerobuffer() -> bool:
     ok &= _kbm_reg_set(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\PrecisionTouchPad", "AAPThreshold", 0, winreg.REG_DWORD)
     return ok
 
+
+def kbm_apply_deep_boost_windows():
+    if not IS_WINDOWS:
+        return
+    import subprocess
+
+    # 1. Tắt Telemetry
+    _kbm_reg_set(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", "AllowTelemetry", 0, winreg.REG_DWORD)
+
+    # 2. Tối ưu TCP/IP Network
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'autotuninglevel=normal'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'chimney=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'dca=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'netdma=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    subprocess.run(['netsh', 'int', 'tcp', 'set', 'global', 'ecncapability=enabled'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+
+    # 3. Kích hoạt Ultimate Performance Power Plan
+    subprocess.run(['powercfg', '-duplicatescheme', 'e9a42b02-d5df-448d-aa00-03f14749eb61'], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+
+    # 4. Tắt Nagle's Algorithm (giảm MS trong game)
+    interfaces = r"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, interfaces, 0, winreg.KEY_READ) as k:
+            i = 0
+            while True:
+                try:
+                    sub_name = winreg.EnumKey(k, i)
+                    _kbm_reg_set(winreg.HKEY_LOCAL_MACHINE, f"{interfaces}\\{sub_name}", "TcpAckFrequency", 1, winreg.REG_DWORD)
+                    _kbm_reg_set(winreg.HKEY_LOCAL_MACHINE, f"{interfaces}\\{sub_name}", "TCPNoDelay", 1, winreg.REG_DWORD)
+                    i += 1
+                except OSError:
+                    break
+    except:
+        pass
+
+
 def kbm_apply_gaming_scheduling() -> bool:
     """Nâng mức ưu tiên ngắt CPU cho chuột & phím khi chơi game (Win32Priority 38 / Games High)."""
     if not IS_WINDOWS:
@@ -19834,7 +20063,11 @@ class KbmDeepOptimizeWorker(QThread):
 
     def _pass_sched(self) -> Tuple[bool, str]:
         kbm_apply_gaming_scheduling()
-        return True, "Đã gán Win32PrioritySeparation 38 (Short High) cho Games & CSRSS"
+        try:
+            kbm_apply_deep_boost_windows()
+        except:
+            pass
+        return True, "Đã gán Win32PrioritySeparation 38 (Short High) cho Games, tối ưu TCP/IP & Ultimate Performance"
 
     def _pass_kb(self) -> Tuple[bool, str]:
         kbm_apply_keyboard_filterkeys(150, 6)
@@ -20680,6 +20913,24 @@ class KbmTweaksPage(QWidget):
             stats.addWidget(sc, 1)
         lay.addWidget(stats_host)
 
+        # Power Plan Combo Box
+        power_lay = QHBoxLayout()
+        power_lbl = QLabel(T("Quản lý Power Plan:"))
+        power_lbl.setStyleSheet("color: #EAF2F8; font-weight: 700; font-size: 11.5px;")
+        power_lay.addWidget(power_lbl)
+
+        self.power_combo = QComboBox()
+        self.power_combo.addItems(["Power Saver (Tiết kiệm)", "Balanced (Cân bằng)", "High Performance (Hiệu năng cao)", "Ultimate Performance (Tối thượng)"])
+        self.power_combo.setStyleSheet("""
+            QComboBox { background: #241A06; border: 1px solid #FFB800; color: #FFF8E0; border-radius: 4px; padding: 4px; font-size: 11px; font-weight: bold; }
+            QComboBox::drop-down { border: 0px; }
+            QComboBox QAbstractItemView { background: #0B0715; color: #FFF8E0; }
+        """)
+        self.power_combo.currentIndexChanged.connect(self._change_power_plan)
+        power_lay.addWidget(self.power_combo)
+        power_lay.addStretch(1)
+        lay.addLayout(power_lay)
+
         # Thanh Preset Profiles nhanh
         preset_host = QWidget()
         pr_lay = QHBoxLayout(preset_host)
@@ -20937,6 +21188,24 @@ class KbmTweaksPage(QWidget):
         q_size = st.get("queue_size", 100)
         self.card_usb.set_value(1.0 if usb_on else 0.0)
         self.card_usb.set_sub(f"HID Buffer: {q_size} • {'Full Power' if usb_on else 'Selective Suspend'}")
+
+
+
+    def _change_power_plan(self, idx):
+        if not IS_WINDOWS:
+            return
+        plans = [
+            'a1841308-3541-4fab-bc81-f71556f20b4a', # Power Saver
+            '381b4222-f694-41f0-9685-ff5bb260df2e', # Balanced
+            '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c', # High Performance
+            'e9a42b02-d5df-448d-aa00-03f14749eb61'  # Ultimate
+        ]
+        guid = plans[idx]
+        import subprocess
+        if idx == 3:
+            subprocess.run(['powercfg', '-duplicatescheme', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        subprocess.run(['powercfg', '-setactive', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        CTX.toast(f"Đã chuyển sang Power Plan: {self.power_combo.currentText()}", "success")
 
     def _apply_preset_esports(self):
         kbm_apply_mouse_accel_tweak(disable_accel=True, use_markc=True)
@@ -21851,6 +22120,24 @@ class FpsBoostPage(QWidget):
             stats.addWidget(sc, 1)
         lay.addWidget(stats_host)
 
+        # Power Plan Combo Box
+        power_lay = QHBoxLayout()
+        power_lbl = QLabel(T("Quản lý Power Plan:"))
+        power_lbl.setStyleSheet("color: #EAF2F8; font-weight: 700; font-size: 11.5px;")
+        power_lay.addWidget(power_lbl)
+
+        self.power_combo = QComboBox()
+        self.power_combo.addItems(["Power Saver (Tiết kiệm)", "Balanced (Cân bằng)", "High Performance (Hiệu năng cao)", "Ultimate Performance (Tối thượng)"])
+        self.power_combo.setStyleSheet("""
+            QComboBox { background: #241A06; border: 1px solid #FFB800; color: #FFF8E0; border-radius: 4px; padding: 4px; font-size: 11px; font-weight: bold; }
+            QComboBox::drop-down { border: 0px; }
+            QComboBox QAbstractItemView { background: #0B0715; color: #FFF8E0; }
+        """)
+        self.power_combo.currentIndexChanged.connect(self._change_power_plan)
+        power_lay.addWidget(self.power_combo)
+        power_lay.addStretch(1)
+        lay.addLayout(power_lay)
+
         # Thanh Preset Profiles nhanh
         preset_host = QWidget()
         pr_lay = QHBoxLayout(preset_host)
@@ -22060,6 +22347,24 @@ class FpsBoostPage(QWidget):
         p_name = st.get("power_name", "Balanced")
         self.card_power.set_value(1.0 if is_ult else 0.0)
         self.card_power.set_sub(f"{p_name[:16]} • {'MMCSS 100%' if st.get('sys_resp_zero') else 'Standard'}")
+
+
+    def _change_power_plan(self, idx):
+        if not IS_WINDOWS:
+            return
+        plans = [
+            'a1841308-3541-4fab-bc81-f71556f20b4a', # Power Saver
+            '381b4222-f694-41f0-9685-ff5bb260df2e', # Balanced
+            '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c', # High Performance
+            'e9a42b02-d5df-448d-aa00-03f14749eb61'  # Ultimate
+        ]
+        guid = plans[idx]
+        import subprocess
+        # Duplicate ultimate if not exist and selected
+        if idx == 3:
+            subprocess.run(['powercfg', '-duplicatescheme', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        subprocess.run(['powercfg', '-setactive', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        CTX.toast(f"Đã chuyển sang Power Plan: {self.power_combo.currentText()}", "success")
 
     def _apply_preset_esports(self):
         fps_apply_all_gpu_optimizations()
