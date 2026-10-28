@@ -4190,7 +4190,13 @@ TARGETS: List[TargetDef] = [
               [_P("%SystemRoot%/MEMORY.DMP", None, False),
                _P("%SystemRoot%/LiveKernelReports", None, True)]),
     TargetDef("minidumps", "Minidump lỗi", "Các bản dump nhỏ mỗi lần hệ thống gặp lỗi nghiêm trọng",
-              "system", "safe", "file", [_P("%SystemRoot%/Minidump", None, True)]),
+              "system", "safe", "file", [_P("%SystemRoot%/Minidump", ["*.dmp"], False)]),
+    TargetDef("dns_cache", "DNS Cache", "Xóa bộ nhớ đệm phân giải tên miền (DNS) của Windows",
+              "system", "safe", "net", [], special="dns_flush"),
+    TargetDef("winsock", "Winsock Reset", "Khôi phục Winsock Catalog về trạng thái gốc để sửa lỗi mạng",
+              "system", "care", "net", [], special="winsock_reset", default_on=False),
+    TargetDef("font_cache", "Font Cache", "Bộ nhớ đệm phông chữ (Xóa để sửa lỗi chữ bị ô vuông)",
+              "system", "care", "file", [_P("%SystemRoot%/ServiceProfiles/LocalService/AppData/Local/FontCache", ["*.dat"], True)], default_on=False),
     TargetDef("wer", "Báo cáo lỗi (WER)", "Báo cáo lỗi ứng dụng đã gửi tới Microsoft",
               "system", "safe", "warn",
               [_P("%LOCALAPPDATA%/Microsoft/Windows/WER", None, True),
@@ -4948,8 +4954,13 @@ def special_clean(t: TargetDef) -> Tuple[int, int, int]:
         except Exception:
             pass
         return 0, 0, 1
-    if t.special == "dns":
+    if t.special == "dns_flush":
         rc, _ = run_cmd(["ipconfig", "/flushdns"])
+        return 512, 1 if rc == 0 else 0, 0 if rc == 0 else 1
+    if t.special == "winsock_reset":
+        if not is_admin():
+            return 0, 0, 1
+        rc, _ = run_cmd(["netsh", "winsock", "reset"])
         return 0, 1 if rc == 0 else 0, 0 if rc == 0 else 1
     if t.special == "clipboard":
         ok = empty_clipboard()
@@ -17135,6 +17146,56 @@ def av_scan_dll_injections() -> List[dict]:
     return threats
 
 
+
+def av_scan_wmi_and_tasks() -> List[dict]:
+    """Quét WMI Persistence và Scheduled Tasks độc hại"""
+    threats = []
+    if not IS_WINDOWS:
+        return threats
+    import subprocess
+
+    # 1. Quét Scheduled Tasks rác/độc hại
+    try:
+        tasks = subprocess.run(['schtasks', '/query', '/fo', 'csv', '/v'], capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        lines = tasks.stdout.strip().split('\n')
+        for line in lines[1:]:
+            parts = line.split('","')
+            if len(parts) > 8:
+                task_name = parts[0].strip('"\\')
+                task_run = parts[8].lower()
+                if "\\temp\\" in task_run or "powershell" in task_run and "-enc" in task_run or "certutil" in task_run:
+                    threats.append({
+                        "type": "task", "category": "Scheduled Task Persistence",
+                        "severity": "CRITICAL", "name": f"Bad.Task.{task_name.split('\\')[-1]}",
+                        "path": task_name, "reason": f"Tác vụ rác/độc hại: {task_run[:50]}...",
+                        "size": 0, "sha256": ""
+                    })
+    except: pass
+
+    # 2. Phát hiện hành vi Đào Coin (Cryptominer Behavior)
+    try:
+        import psutil
+        for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'cmdline']):
+            name = (p.info.get('name') or '').lower()
+            cmd = " ".join(p.info.get('cmdline') or []).lower()
+            cpu = p.info.get('cpu_percent') or 0.0
+
+            bad_miner_terms = ['--algo=', '--coin=', 'stratum+tcp', 'cryptonight', 'xmr-stak', 'xmrig', 'nicehash']
+            is_miner = any(term in cmd for term in bad_miner_terms) or any(term in name for term in bad_miner_terms)
+
+            if is_miner or (cpu > 70.0 and name not in ('system', 'idle', 'dwm.exe', 'csrss.exe', 'explorer.exe') and not name.endswith('.tmp')):
+                threats.append({
+                    "type": "process", "category": "Cryptominer / High CPU",
+                    "severity": "CRITICAL" if is_miner else "MEDIUM",
+                    "name": f"CoinMiner.Gen.{name}" if is_miner else f"Suspicious.HighCPU.{name}",
+                    "path": p.info.get('exe') or name, "reason": f"Nghi ngờ đào coin hoặc ngốn quá nhiều CPU ({cpu}%)",
+                    "size": 0, "sha256": ""
+                })
+    except: pass
+
+    return threats
+
+
 def av_scan_startup_and_persistence() -> List[dict]:
     """Quét toàn bộ 16+ vị trí bám rễ registry, Winlogon, Image File Execution Options, Startup folders."""
     threats = []
@@ -17766,6 +17827,17 @@ class AvScanWorker(QThread):
         SETTINGS.set("av_signature_count", len(db))
         self.sig_step.emit(0, 1, f"Đã nạp {len(db)} chữ ký & 60 luật Heuristic")
         av_log(f"Engine Antivirus Pro Initialized: {len(db)} signatures loaded")
+        if self._stop_requested: return
+
+
+        # -------------------------------------------------- BƯỚC 1.5: Quét WMI & Cryptominer
+        self.sig_step.emit(1, 0, "Đang quét WMI, Scheduled Tasks & Cryptominer...")
+        advanced_threats = av_scan_wmi_and_tasks()
+        for t in advanced_threats:
+            if t["path"] not in whitelist:
+                self._all_threats.append(t)
+                self.sig_threat.emit(t)
+        total_scanned += 15
         if self._stop_requested: return
 
         # -------------------------------------------------- BƯỚC 2: Quét Tiến trình & Cây Process
@@ -20841,6 +20913,24 @@ class KbmTweaksPage(QWidget):
             stats.addWidget(sc, 1)
         lay.addWidget(stats_host)
 
+        # Power Plan Combo Box
+        power_lay = QHBoxLayout()
+        power_lbl = QLabel(T("Quản lý Power Plan:"))
+        power_lbl.setStyleSheet("color: #EAF2F8; font-weight: 700; font-size: 11.5px;")
+        power_lay.addWidget(power_lbl)
+
+        self.power_combo = QComboBox()
+        self.power_combo.addItems(["Power Saver (Tiết kiệm)", "Balanced (Cân bằng)", "High Performance (Hiệu năng cao)", "Ultimate Performance (Tối thượng)"])
+        self.power_combo.setStyleSheet("""
+            QComboBox { background: #241A06; border: 1px solid #FFB800; color: #FFF8E0; border-radius: 4px; padding: 4px; font-size: 11px; font-weight: bold; }
+            QComboBox::drop-down { border: 0px; }
+            QComboBox QAbstractItemView { background: #0B0715; color: #FFF8E0; }
+        """)
+        self.power_combo.currentIndexChanged.connect(self._change_power_plan)
+        power_lay.addWidget(self.power_combo)
+        power_lay.addStretch(1)
+        lay.addLayout(power_lay)
+
         # Thanh Preset Profiles nhanh
         preset_host = QWidget()
         pr_lay = QHBoxLayout(preset_host)
@@ -21098,6 +21188,24 @@ class KbmTweaksPage(QWidget):
         q_size = st.get("queue_size", 100)
         self.card_usb.set_value(1.0 if usb_on else 0.0)
         self.card_usb.set_sub(f"HID Buffer: {q_size} • {'Full Power' if usb_on else 'Selective Suspend'}")
+
+
+
+    def _change_power_plan(self, idx):
+        if not IS_WINDOWS:
+            return
+        plans = [
+            'a1841308-3541-4fab-bc81-f71556f20b4a', # Power Saver
+            '381b4222-f694-41f0-9685-ff5bb260df2e', # Balanced
+            '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c', # High Performance
+            'e9a42b02-d5df-448d-aa00-03f14749eb61'  # Ultimate
+        ]
+        guid = plans[idx]
+        import subprocess
+        if idx == 3:
+            subprocess.run(['powercfg', '-duplicatescheme', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        subprocess.run(['powercfg', '-setactive', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        CTX.toast(f"Đã chuyển sang Power Plan: {self.power_combo.currentText()}", "success")
 
     def _apply_preset_esports(self):
         kbm_apply_mouse_accel_tweak(disable_accel=True, use_markc=True)
@@ -22012,6 +22120,24 @@ class FpsBoostPage(QWidget):
             stats.addWidget(sc, 1)
         lay.addWidget(stats_host)
 
+        # Power Plan Combo Box
+        power_lay = QHBoxLayout()
+        power_lbl = QLabel(T("Quản lý Power Plan:"))
+        power_lbl.setStyleSheet("color: #EAF2F8; font-weight: 700; font-size: 11.5px;")
+        power_lay.addWidget(power_lbl)
+
+        self.power_combo = QComboBox()
+        self.power_combo.addItems(["Power Saver (Tiết kiệm)", "Balanced (Cân bằng)", "High Performance (Hiệu năng cao)", "Ultimate Performance (Tối thượng)"])
+        self.power_combo.setStyleSheet("""
+            QComboBox { background: #241A06; border: 1px solid #FFB800; color: #FFF8E0; border-radius: 4px; padding: 4px; font-size: 11px; font-weight: bold; }
+            QComboBox::drop-down { border: 0px; }
+            QComboBox QAbstractItemView { background: #0B0715; color: #FFF8E0; }
+        """)
+        self.power_combo.currentIndexChanged.connect(self._change_power_plan)
+        power_lay.addWidget(self.power_combo)
+        power_lay.addStretch(1)
+        lay.addLayout(power_lay)
+
         # Thanh Preset Profiles nhanh
         preset_host = QWidget()
         pr_lay = QHBoxLayout(preset_host)
@@ -22221,6 +22347,24 @@ class FpsBoostPage(QWidget):
         p_name = st.get("power_name", "Balanced")
         self.card_power.set_value(1.0 if is_ult else 0.0)
         self.card_power.set_sub(f"{p_name[:16]} • {'MMCSS 100%' if st.get('sys_resp_zero') else 'Standard'}")
+
+
+    def _change_power_plan(self, idx):
+        if not IS_WINDOWS:
+            return
+        plans = [
+            'a1841308-3541-4fab-bc81-f71556f20b4a', # Power Saver
+            '381b4222-f694-41f0-9685-ff5bb260df2e', # Balanced
+            '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c', # High Performance
+            'e9a42b02-d5df-448d-aa00-03f14749eb61'  # Ultimate
+        ]
+        guid = plans[idx]
+        import subprocess
+        # Duplicate ultimate if not exist and selected
+        if idx == 3:
+            subprocess.run(['powercfg', '-duplicatescheme', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        subprocess.run(['powercfg', '-setactive', guid], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        CTX.toast(f"Đã chuyển sang Power Plan: {self.power_combo.currentText()}", "success")
 
     def _apply_preset_esports(self):
         fps_apply_all_gpu_optimizations()
